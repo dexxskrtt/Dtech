@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>万剑归宗 - 赛博修仙</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<style>
+html,body{
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  background:#000814;
+  font-family:system-ui;
+}
+#title{
+  position:fixed;
+  top:14px;
+  width:100%;
+  text-align:center;
+  font-size:26px;
+  letter-spacing:4px;
+  color:#9ffcff;
+  text-shadow:0 0 20px #00f0ff;
+  z-index:10;
+}
+#loading{
+  position:fixed;
+  inset:0;
+  background:radial-gradient(circle,#020c1b,#000814);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#9ffcff;
+  font-size:20px;
+  z-index:20;
+}
+video{ display:none; }
+</style>
+</head>
+
+<body>
+<div id="title">万剑归宗 – 赛博修仙</div>
+<div id="loading">🔮 Awakening Sword Domain...</div>
+<video id="video" playsinline></video>
+
+<script>
+/* =======================
+   BASIC THREE.JS SETUP
+======================= */
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x000814, 20, 120);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 300);
+camera.position.set(0,5,30);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearColor(0x000814);
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+/* =======================
+   LIGHTING
+======================= */
+scene.add(new THREE.AmbientLight(0x88ccff,0.4));
+const dir = new THREE.DirectionalLight(0x99eaff,1.2);
+dir.position.set(10,20,10);
+scene.add(dir);
+
+/* =======================
+   SWORD GEOMETRY
+======================= */
+function createSword(){
+  const g = new THREE.Group();
+
+  const blade = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08,3.2,0.15),
+    new THREE.MeshStandardMaterial({
+      color:0xffffff,
+      emissive:0x00f0ff,
+      emissiveIntensity:1.4
+    })
+  );
+  blade.position.y = 1.6;
+
+  const handle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12,0.12,0.6,8),
+    new THREE.MeshStandardMaterial({color:0x222222})
+  );
+  handle.position.y = -0.3;
+
+  g.add(blade,handle);
+  return g;
+}
+
+/* =======================
+   SWORD SWARM
+======================= */
+const SWORD_COUNT = 300;
+const swords = [];
+const targets = [];
+
+for(let i=0;i<SWORD_COUNT;i++){
+  const s = createSword();
+  scene.add(s);
+
+  s.position.set(
+    (Math.random()-0.5)*20,
+    (Math.random()-0.5)*20,
+    (Math.random()-0.5)*20
+  );
+
+  swords.push(s);
+  targets.push(s.position.clone());
+}
+
+/* =======================
+   FORMATIONS
+======================= */
+function idleFormation(){
+  swords.forEach((s,i)=>{
+    const a = i/SWORD_COUNT * Math.PI*2;
+    targets[i].set(
+      Math.cos(a)*10,
+      Math.sin(a*2)*3,
+      Math.sin(a)*10
+    );
+  });
+}
+
+function disperse(){
+  swords.forEach((s,i)=>{
+    targets[i].set(
+      (Math.random()-0.5)*25,
+      (Math.random()-0.5)*15,
+      (Math.random()-0.5)*25
+    );
+  });
+}
+
+function converge(){
+  swords.forEach((s,i)=>{
+    targets[i].set(0,0,-20 - i*0.05);
+  });
+}
+
+function pointAttack(x,y){
+  swords.forEach((s,i)=>{
+    targets[i].set(x*15,(0.5-y)*10,-30 - i*0.1);
+  });
+}
+
+/* =======================
+   MEDIAPIPE HANDS
+======================= */
+let handState = "idle";
+
+const hands = new Hands({
+  locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+hands.setOptions({
+  maxNumHands:2,
+  modelComplexity:1,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.6
+});
+
+hands.onResults(res=>{
+  if(!res.multiHandLandmarks){
+    handState="idle";
+    return;
+  }
+
+  const lm = res.multiHandLandmarks[0];
+  const wrist = lm[0];
+  const indexTip = lm[8];
+  const thumbTip = lm[4];
+
+  const openPalm = Math.abs(indexTip.y - wrist.y) > 0.15;
+  const fist = Math.abs(indexTip.y - thumbTip.y) < 0.05;
+
+  if(openPalm && res.multiHandLandmarks.length===2){
+    handState="disperse";
+  }else if(fist && res.multiHandLandmarks.length===2){
+    handState="converge";
+  }else{
+    handState="point";
+    pointAttack(indexTip.x,indexTip.y);
+  }
+});
+
+const video = document.getElementById("video");
+const cam = new Camera(video,{
+  onFrame: async()=>{ await hands.send({image:video}); },
+  width:640,height:480
+});
+cam.start();
+
+/* =======================
+   ANIMATION LOOP
+======================= */
+document.getElementById("loading").style.display="none";
+idleFormation();
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  if(handState==="idle") idleFormation();
+  if(handState==="disperse") disperse();
+  if(handState==="converge") converge();
+
+  swords.forEach((s,i)=>{
+    s.position.lerp(targets[i],0.05);
+    s.lookAt(targets[i]);
+  });
+
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
